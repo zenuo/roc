@@ -489,7 +489,7 @@ if compiler in ['gcc', 'clang']:
         ])
     if target_platform in ['linux']:
         env.Append(LINKFLAGS=[
-            '-pthread',
+            '-pthread', '-lasound',
         ])
     if variant == 'debug':
         env.Append(CXXFLAGS=['-ggdb'])

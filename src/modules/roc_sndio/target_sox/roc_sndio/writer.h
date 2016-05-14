@@ -65,20 +65,7 @@ public:
 private:
     virtual void run();
 
-    void loop_();
-
-    bool write_(const sox_sample_t* samples, size_t n_samples);
-    void close_();
-
-    sox_format_t* output_;
-    sox_signalinfo_t out_signal_;
-
     audio::ISampleBufferReader& input_;
-
-    size_t clips_;
-    size_t n_bufs_;
-
-    core::Atomic stop_;
 };
 
 } // namespace sndio
