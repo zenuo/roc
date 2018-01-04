@@ -321,63 +321,61 @@ sample_t Resampler::resample_(const size_t channel_offset) {
     const long_fixedpoint_t qt_pos = qt_window_size_ + qt_sample_
         - qceil(qt_window_size_ + qt_sample_ - qt_half_window_len_);
 
-    // Sinc table position for the previous frame end.
-    const fixedpoint_t qt_sinc_prev_end =
+    const fixedpoint_t qt_sinc_pos =
         (fixedpoint_t)((qt_pos * (long_fixedpoint_t)qt_sinc_step_) >> FRACT_BIT_COUNT);
 
-    // Sinc table position for the current frame center.
-    const fixedpoint_t qt_sinc_cur_center = qt_sinc_prev_end % qt_sinc_step_;
+    const fixedpoint_t qt_sinc_cur_center = qt_sinc_pos % qt_sinc_step_;
 
-    // Sinc table position for the current frame end.
-    const fixedpoint_t qt_sinc_cur_end = qt_sinc_prev_end
+    const fixedpoint_t qt_sinc_cur_end = qt_sinc_pos
         - fixedpoint_t(ind_prev_end - ind_prev_begin) / channels_num_ * qt_sinc_step_;
 
-    // Current frame center.
     const size_t ind_cur_center = ind_cur_begin
         + (qt_sinc_cur_end - qt_sinc_cur_center) * channels_num_ / qt_sinc_step_;
 
-    // Sinc table position.
-    fixedpoint_t qt_sinc_pos;
+    const size_t len_cur_left = ind_cur_center - ind_cur_begin;
+    const size_t len_prev = len_cur_left + ind_prev_end - ind_prev_begin;
 
-    // Fractional part of time position at the begining.
-    float f_sinc_pos_fract;
+    const size_t len_cur_right = ind_cur_end - ind_cur_center;
+    const size_t len_next = len_cur_right + ind_next_end - ind_next_begin;
 
-    // Frame index.
-    size_t i;
+    const size_t len = ROC_MAX(len_prev, len_next);
 
-    // Output sample.
+    const float f_sinc_pos_fract_left = fractional(qt_sinc_pos << window_interp_bits_);
+    const float f_sinc_pos_fract_right =
+        fractional((qt_sinc_step_ - qt_sinc_cur_center) << window_interp_bits_);
+
+    fixedpoint_t qt_sinc_pos_left = qt_sinc_cur_center;
+    fixedpoint_t qt_sinc_pos_right = qt_sinc_step_ - qt_sinc_cur_center;
+
     sample_t accumulator = 0;
 
-    qt_sinc_pos = qt_sinc_cur_center;
-    f_sinc_pos_fract = fractional(qt_sinc_prev_end << window_interp_bits_);
+    for (size_t i = 0; i <= len; i += channels_num_) {
+        // Previous frame.
+        if (i >= len_cur_left && i <= len_prev) {
+            accumulator += prev_frame_[ind_prev_end - (i - len_cur_left)]
+                * sinc_(qt_sinc_pos_left, f_sinc_pos_fract_left);
+        }
 
-    // Run through the left half of the current frame.
-    for (i = ind_cur_center; i != ind_cur_begin; i -= channels_num_) {
-        accumulator += curr_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
-        qt_sinc_pos += qt_sinc_step_;
-    }
-    accumulator += curr_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+        // Left half of the current frame.
+        if (i <= len_cur_left) {
+            accumulator += curr_frame_[ind_cur_center - i]
+                * sinc_(qt_sinc_pos_left, f_sinc_pos_fract_left);
+        }
 
-    // Run through the previous frame.
-    for (i = ind_prev_end; i != ind_prev_begin; i -= channels_num_) {
-        accumulator += prev_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
-        qt_sinc_pos += qt_sinc_step_;
-    }
-    accumulator += prev_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+        // Right half of the current frame.
+        if (i < len_cur_right) {
+            accumulator += curr_frame_[ind_cur_center + channels_num_ + i]
+                * sinc_(qt_sinc_pos_right, f_sinc_pos_fract_right);
+        }
 
-    qt_sinc_pos = qt_sinc_step_ - qt_sinc_cur_center;
-    f_sinc_pos_fract = fractional(qt_sinc_pos << window_interp_bits_);
+        // Next frame.
+        if (i >= len_cur_right && i < len_next) {
+            accumulator += next_frame_[ind_next_begin + (i - len_cur_right)]
+                * sinc_(qt_sinc_pos_right, f_sinc_pos_fract_right);
+        }
 
-    // Run through the right half of the current frame.
-    for (i = ind_cur_center + channels_num_; i <= ind_cur_end; i += channels_num_) {
-        accumulator += curr_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
-        qt_sinc_pos += qt_sinc_step_;
-    }
-
-    // Run through the next frame.
-    for (i = ind_next_begin; i < ind_next_end; i += channels_num_) {
-        accumulator += next_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
-        qt_sinc_pos += qt_sinc_step_;
+        qt_sinc_pos_left += qt_sinc_step_;
+        qt_sinc_pos_right += qt_sinc_step_;
     }
 
     return accumulator;
