@@ -269,12 +269,10 @@ bool Resampler::fill_sinc_() {
 // that's why there are two arguments in this function: integer part and fractional
 // part of time coordinate.
 sample_t Resampler::sinc_(const fixedpoint_t x, const float fract_x) {
-    // Tables index smaller than to x
-    const sample_t hl = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_))];
+    const size_t index = (x >> (FRACT_BIT_COUNT - window_interp_bits_));
 
-    // Tables index next to x
-    const sample_t hh =
-        sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_)) + 1];
+    const sample_t hl = sinc_table_ptr_[index];     // table index smaller than x
+    const sample_t hh = sinc_table_ptr_[index + 1]; // table index next to x
 
     const sample_t result = hl + fract_x * (hh - hl);
 
@@ -282,102 +280,104 @@ sample_t Resampler::sinc_(const fixedpoint_t x, const float fract_x) {
 }
 
 sample_t Resampler::resample_(const size_t channel_offset) {
-    // Index of first input sample in window.
-    size_t ind_begin_prev;
+    const fixedpoint_t qt_sample_minus_half = (qt_sample_ - qt_half_window_len_);
+    const fixedpoint_t qt_sample_plus_half = (qt_sample_ + qt_half_window_len_);
 
-    // Window lasts till that index.
-    const size_t ind_end_prev = channelize_index(channel_len_, channel_offset);
+    // Previous frame bounds.
+    size_t ind_prev_begin;
+    const size_t ind_prev_end = channelize_index(channel_len_, channel_offset);
 
-    size_t ind_begin_cur;
-    size_t ind_end_cur;
+    // Current frame bounds.
+    size_t ind_cur_begin;
+    size_t ind_cur_end;
 
-    const size_t ind_begin_next = channelize_index(0, channel_offset);
-    size_t ind_end_next;
+    // Next frame bounds.
+    const size_t ind_next_begin = channelize_index(0, channel_offset);
+    size_t ind_next_end;
 
-    ind_begin_prev = (qt_sample_ >= qt_half_window_len_)
-        ? channel_len_
-        : fixedpoint_to_size(qceil(qt_sample_ + (qt_window_size_ - qt_half_window_len_)));
-    // ind_begin_prev is comparable with channel_len_ till we'll convert it to channalyzed
-    // presentation.
-    roc_panic_if(ind_begin_prev > channel_len_);
-    ind_begin_prev = channelize_index(ind_begin_prev, channel_offset);
+    if ((signed_fixedpoint_t)qt_sample_minus_half >= 0) {
+        ind_prev_begin = channel_len_;
+        ind_cur_begin = fixedpoint_to_size(qceil(qt_sample_minus_half));
+    } else {
+        ind_prev_begin = fixedpoint_to_size(qceil(qt_sample_minus_half + qt_window_size_));
+        ind_cur_begin = 0;
+    }
 
-    ind_begin_cur = (qt_sample_ >= qt_half_window_len_)
-        ? fixedpoint_to_size(qceil(qt_sample_ - qt_half_window_len_))
-        : 0;
-    roc_panic_if(ind_begin_cur > channel_len_);
-    ind_begin_cur = channelize_index(ind_begin_cur, channel_offset);
+    ind_prev_begin = channelize_index(ind_prev_begin, channel_offset);
+    ind_cur_begin = channelize_index(ind_cur_begin, channel_offset);
 
-    ind_end_cur = ((qt_sample_ + qt_half_window_len_) > qt_window_size_)
-        ? channel_len_ - 1
-        : fixedpoint_to_size(qfloor(qt_sample_ + qt_half_window_len_));
-    roc_panic_if(ind_end_cur > channel_len_);
-    ind_end_cur = channelize_index(ind_end_cur, channel_offset);
+    if (qt_sample_plus_half > qt_window_size_) {
+        ind_cur_end = channel_len_ - 1;
+        ind_next_end =
+            fixedpoint_to_size(qfloor(qt_sample_plus_half - qt_window_size_)) + 1;
+    } else {
+        ind_cur_end = fixedpoint_to_size(qfloor(qt_sample_plus_half));
+        ind_next_end = 0;
+    }
 
-    ind_end_next = ((qt_sample_ + qt_half_window_len_) > qt_window_size_)
-        ? fixedpoint_to_size(qfloor(qt_sample_ + qt_half_window_len_ - qt_window_size_))
-            + 1
-        : 0;
-    roc_panic_if(ind_end_next > channel_len_);
-    ind_end_next = channelize_index(ind_end_next, channel_offset);
+    ind_cur_end = channelize_index(ind_cur_end, channel_offset);
+    ind_next_end = channelize_index(ind_next_end, channel_offset);
 
-    // Counter inside window.
-    // t_sinc = (t_sample - ceil( t_sample - window_len/cutoff*scale )) * sinc_step
-    const long_fixedpoint_t qt_cur_ = qt_window_size_ + qt_sample_
+    const long_fixedpoint_t qt_pos = qt_window_size_ + qt_sample_
         - qceil(qt_window_size_ + qt_sample_ - qt_half_window_len_);
-    fixedpoint_t qt_sinc_cur =
-        (fixedpoint_t)((qt_cur_ * (long_fixedpoint_t)qt_sinc_step_) >> FRACT_BIT_COUNT);
 
-    // sinc_table defined in positive half-plane, so at the begining of the window
-    // qt_sinc_cur starts decreasing and after we cross 0 it will be increasing
-    // till the end of the window.
-    fixedpoint_t qt_sinc_inc = qt_sinc_step_;
+    // Sinc table position for the previous frame end.
+    const fixedpoint_t qt_sinc_prev_end =
+        (fixedpoint_t)((qt_pos * (long_fixedpoint_t)qt_sinc_step_) >> FRACT_BIT_COUNT);
 
-    // Compute fractional part of time position at the begining. It wont change during
-    // the run.
-    float f_sinc_cur_fract = fractional(qt_sinc_cur << window_interp_bits_);
-    sample_t accumulator = 0;
+    // Sinc table position for the current frame center.
+    const fixedpoint_t qt_sinc_cur_center = qt_sinc_prev_end % qt_sinc_step_;
 
+    // Sinc table position for the current frame end.
+    const fixedpoint_t qt_sinc_cur_end = qt_sinc_prev_end
+        - fixedpoint_t(ind_prev_end - ind_prev_begin) / channels_num_ * qt_sinc_step_;
+
+    // Current frame center.
+    const size_t ind_cur_center = ind_cur_begin
+        + (qt_sinc_cur_end - qt_sinc_cur_center) * channels_num_ / qt_sinc_step_;
+
+    // Sinc table position.
+    fixedpoint_t qt_sinc_pos;
+
+    // Fractional part of time position at the begining.
+    float f_sinc_pos_fract;
+
+    // Frame index.
     size_t i;
 
-    // Run through previous frame.
-    for (i = ind_begin_prev; i < ind_end_prev; i += channels_num_) {
-        accumulator += prev_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
-        qt_sinc_cur -= qt_sinc_inc;
+    // Output sample.
+    sample_t accumulator = 0;
+
+    qt_sinc_pos = qt_sinc_cur_center;
+    f_sinc_pos_fract = fractional(qt_sinc_prev_end << window_interp_bits_);
+
+    // Run through the left half of the current frame.
+    for (i = ind_cur_center; i != ind_cur_begin; i -= channels_num_) {
+        accumulator += curr_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+        qt_sinc_pos += qt_sinc_step_;
+    }
+    accumulator += curr_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+
+    // Run through the previous frame.
+    for (i = ind_prev_end; i != ind_prev_begin; i -= channels_num_) {
+        accumulator += prev_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+        qt_sinc_pos += qt_sinc_step_;
+    }
+    accumulator += prev_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+
+    qt_sinc_pos = qt_sinc_step_ - qt_sinc_cur_center;
+    f_sinc_pos_fract = fractional(qt_sinc_pos << window_interp_bits_);
+
+    // Run through the right half of the current frame.
+    for (i = ind_cur_center + channels_num_; i <= ind_cur_end; i += channels_num_) {
+        accumulator += curr_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+        qt_sinc_pos += qt_sinc_step_;
     }
 
-    // Run through current frame through the left windows side. qt_sinc_cur is decreasing.
-    i = ind_begin_cur;
-
-    accumulator += curr_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
-    while (qt_sinc_cur >= qt_sinc_step_) {
-        i += channels_num_;
-        qt_sinc_cur -= qt_sinc_inc;
-        accumulator += curr_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
-    }
-
-    i += channels_num_;
-
-    roc_panic_if(i > channelize_index(channel_len_, channel_offset));
-
-    // Crossing zero -- we just need to switch qt_sinc_cur.
-    // -1 ------------ 0 ------------- +1
-    //      ^                  ^
-    //      |                  |
-    //   -qt_sinc_cur  ->  +qt_sinc_cur     <=> qt_sinc_cur = 1 - qt_sinc_cur
-    qt_sinc_cur = qt_sinc_step_ - qt_sinc_cur; // qt_sinc_cur = -qt_sinc_cur + 1;
-    f_sinc_cur_fract = fractional(qt_sinc_cur << window_interp_bits_);
-
-    // Run through right side of the window, increasing qt_sinc_cur.
-    for (; i <= ind_end_cur; i += channels_num_) {
-        accumulator += curr_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
-        qt_sinc_cur += qt_sinc_inc;
-    }
-
-    // Next frames run.
-    for (i = ind_begin_next; i < ind_end_next; i += channels_num_) {
-        accumulator += next_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
-        qt_sinc_cur += qt_sinc_inc;
+    // Run through the next frame.
+    for (i = ind_next_begin; i < ind_next_end; i += channels_num_) {
+        accumulator += next_frame_[i] * sinc_(qt_sinc_pos, f_sinc_pos_fract);
+        qt_sinc_pos += qt_sinc_step_;
     }
 
     return accumulator;
