@@ -97,7 +97,7 @@ Resampler::Resampler(core::IAllocator& allocator,
     , qt_window_size_(fixedpoint_t(channel_len_ << FRACT_BIT_COUNT))
     , qt_sample_(default_sample_)
     , qt_dt_(0)
-    , cutoff_freq_(0.9f)
+    , cutoff_freq_(0.96f)
     , valid_(false) {
     if (!check_config_()) {
         return;
@@ -218,29 +218,76 @@ void Resampler::renew_buffers(core::Slice<sample_t>& prev,
     next_frame_ = next.data();
 }
 
+static double zeroethOrderBessel( double x )
+{
+    const double eps = 0.000001;
+    
+    //  initialize the series term for m=0 and the result
+    double besselValue = 0;
+    double term = 1;
+    double m = 0;
+    
+    //  accumulate terms as long as they are significant
+    while(term  > eps * besselValue)
+    {
+        besselValue += term;
+        
+        //  update the term
+        ++m;
+        term *= (x*x) / (4*m*m);
+    }
+    
+    return besselValue;
+}
+
+static void kaiser( double* win, const size_t N, double shape )
+{   
+    //  Pre-compute the shared denominator in the Kaiser equation. 
+    const double oneOverDenom = 1.0 / zeroethOrderBessel( shape );
+  
+    // const unsigned int N = win.size() - 1;
+    const double oneOverN = 1.0 / (N-1);
+    
+    for ( unsigned int n = 0; n < N; ++n )
+    {
+        const double K = (2.0 * n * oneOverN) - 1.0;
+        const double arg = sqrt( 1.0 - (K * K) );
+        
+        win[n] = zeroethOrderBessel( shape * arg ) * oneOverDenom;
+    }
+}
+
+
 bool Resampler::fill_sinc_() {
     if (!sinc_table_.resize(window_len_ * window_interp_ + 2)) {
         roc_log(LogError, "resampler: can't allocate sinc table");
         return false;
     }
+    const size_t sz = window_len_ * window_interp_ + 2;
+    sinc_table_ptr_ = new double[sz];
 
     const double sinc_step = 1.0 / (double)window_interp_;
     double sinc_t = sinc_step;
 
-    sinc_table_[0] = 1.0f;
-    for (size_t i = 1; i < sinc_table_.size(); ++i) {
+    sinc_table_ptr_[0] = 1.0f;
+    double *w = new double[sz*2];
+    kaiser(w, sz*2, 16.0);
+    for (size_t i = 1; i < sz; ++i) {
         // const float window = 1;
-        const double window = 0.54
-            - 0.46 * cos(2 * M_PI
-                         * ((double)(i - 1) / 2.0 / (double)sinc_table_.size() + 0.5));
-        sinc_table_[i] = (float)(sin(M_PI * sinc_t) / M_PI / sinc_t * window);
+        // const double window = 0.54
+            // - 0.46 * cos(2 * M_PI
+                         // * ((double)(i - 1) / 2.0 / (double)sz + 0.5));
+        const double window = w[sz + i];
+
+        sinc_table_ptr_[i] = double(sin(M_PI * sinc_t) / M_PI / sinc_t * window);
         sinc_t += sinc_step;
     }
-    sinc_table_[sinc_table_.size() - 2] = 0;
-    sinc_table_[sinc_table_.size() - 1] = 0;
+    // sinc_table_ptr_[sz - 2] = 0;
+    // sinc_table_ptr_[sz - 1] = 0;
 
-    sinc_table_ptr_ = &sinc_table_[0];
+    // sinc_table_ptr_ = &sinc_table_ptr_[0];
 
+    delete []w;
     return true;
 }
 
@@ -250,21 +297,36 @@ bool Resampler::fill_sinc_() {
 // During going through input signal window only integer part of argument changes,
 // that's why there are two arguments in this function: integer part and fractional
 // part of time coordinate.
-sample_t Resampler::sinc_(const fixedpoint_t x, const float fract_x) {
+double Resampler::sinc_(const fixedpoint_t x, const double fract_x) {
 #if 0 // FIXME
     roc_panic_if(x > (window_len_ << FRACT_BIT_COUNT));
 #endif
 
-    // Tables index smaller than to x
-    const sample_t hl = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_))];
+    // // Tables index smaller than to x
+    // const double hl = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_))];
 
-    // Tables index next to x
-    const sample_t hh =
-        sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_)) + 1];
+    // // Tables index next to x
+    // const double hh =
+    //     sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_)) + 1];
 
-    const sample_t result = hl + fract_x * (hh - hl);
+    // const double result = hl + fract_x * (hh - hl);
 
-    return scaling_ > 1.0f ? result / scaling_ : result;
+    // return scaling_ > 1.0f ? result / scaling_ : result;
+
+    double interp[4];
+    interp[3] =  -0.1666666667*fract_x + 0.1666666667*(fract_x*fract_x*fract_x);
+    interp[2] = fract_x + 0.5*(fract_x*fract_x) - 0.5*(fract_x*fract_x*fract_x);
+    /*interp[2] = 1.f - 0.5f*fract_x - fract_x*fract_x + 0.5f*fract_x*fract_x*fract_x;*/
+    interp[0] = -0.3333333333*fract_x + 0.5*(fract_x*fract_x) - 0.1666666667*(fract_x*fract_x*fract_x);
+    /* Just to make sure we don't have rounding problems */
+    interp[1] = 1.f-interp[3]-interp[2]-interp[0];
+
+    const double f0 = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_))];
+    const double f1 = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_)) + 1];
+    const double f2 = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_)) + 2];
+    const double f3 = sinc_table_ptr_[(x >> (FRACT_BIT_COUNT - window_interp_bits_)) + 3];
+    const double res = interp[0]*f0 + interp[1]*f1 + interp[2]*f2 + interp[3]*f3;
+    return res;
 }
 
 sample_t Resampler::resample_(const size_t channel_offset) {
@@ -322,24 +384,24 @@ sample_t Resampler::resample_(const size_t channel_offset) {
     // Compute fractional part of time position at the begining. It wont change during
     // the run.
     float f_sinc_cur_fract = fractional(qt_sinc_cur << window_interp_bits_);
-    sample_t accumulator = 0;
+    double accumulator = 0;
 
     size_t i;
 
     // Run through previous frame.
     for (i = ind_begin_prev; i < ind_end_prev; i += channels_num_) {
-        accumulator += prev_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
+        accumulator += double(prev_frame_[i]) * sinc_(qt_sinc_cur, f_sinc_cur_fract);
         qt_sinc_cur -= qt_sinc_inc;
     }
 
     // Run through current frame through the left windows side. qt_sinc_cur is decreasing.
     i = ind_begin_cur;
 
-    accumulator += curr_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
+    accumulator += double(curr_frame_[i]) * sinc_(qt_sinc_cur, f_sinc_cur_fract);
     while (qt_sinc_cur >= qt_sinc_step_) {
         i += channels_num_;
         qt_sinc_cur -= qt_sinc_inc;
-        accumulator += curr_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
+        accumulator += double(curr_frame_[i]) * sinc_(qt_sinc_cur, f_sinc_cur_fract);
     }
 
     i += channels_num_;
@@ -356,17 +418,17 @@ sample_t Resampler::resample_(const size_t channel_offset) {
 
     // Run through right side of the window, increasing qt_sinc_cur.
     for (; i <= ind_end_cur; i += channels_num_) {
-        accumulator += curr_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
+        accumulator += double(curr_frame_[i]) * sinc_(qt_sinc_cur, f_sinc_cur_fract);
         qt_sinc_cur += qt_sinc_inc;
     }
 
     // Next frames run.
     for (i = ind_begin_next; i < ind_end_next; i += channels_num_) {
-        accumulator += next_frame_[i] * sinc_(qt_sinc_cur, f_sinc_cur_fract);
+        accumulator += double(next_frame_[i]) * sinc_(qt_sinc_cur, f_sinc_cur_fract);
         qt_sinc_cur += qt_sinc_inc;
     }
 
-    return accumulator;
+    return sample_t(accumulator);
 }
 
 } // namespace audio

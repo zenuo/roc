@@ -105,7 +105,7 @@ private:
     bool check_config_() const;
 
     bool fill_sinc_();
-    sample_t sinc_(fixedpoint_t x, float fract_x);
+    double sinc_(fixedpoint_t x, double fract_x);
 
     // Pointers to 3 frames of stream window.
     sample_t* prev_frame_;
@@ -130,7 +130,7 @@ private:
     const size_t window_interp_bits_; //!< The number of bits in window_interp_.
 
     core::Array<sample_t> sinc_table_;
-    const sample_t* sinc_table_ptr_;
+    double* sinc_table_ptr_;
 
     // half window len in Q8.24 in terms of input signal.
     fixedpoint_t qt_half_window_len_;
