@@ -26,6 +26,10 @@ if __name__ == "__main__":
                         default="/tmp/sin_out.wav",
                         type="string", dest="src_file",
                         help="Where to store retrieved signal.")
+    parser.add_option( "-i", "--input", action="store", 
+                        default="/tmp/sin.wav",
+                        type="string", dest="inp_file",
+                        help="Where to store retrieved signal.")
     
     (options, args) = parser.parse_args()
 
@@ -39,18 +43,19 @@ if __name__ == "__main__":
     out_fl = scipy.io.wavfile.read( options.src_file )
     Fs = out_fl[0]
     out = np.array([x/math.pow(2.0,31) for x,y in out_fl[1]])
-    # out = np.array([x for x,y in out_fl[1]])
-    print(out_fl)
+
+    inp_fl = scipy.io.wavfile.read( options.inp_file )
+    Fs = inp_fl[0]
+    inp = np.array([x/math.pow(2.0,15) for x,y in inp_fl[1]])
 
     print("Fs: ", Fs)
 
 
     plt.figure()
-    plt.subplot(211)
-    plt.plot(*Spectrum(out))
+    plt.plot(*Spectrum(out), label="Out")
+    plt.plot(*Spectrum(inp), label="Inp")
     plt.grid()
     plt.xlim([0, 24e3])
     plt.ylim([-150, 0])
-    plt.subplot(212)
-    plt.plot(out)
+    plt.legend()
     plt.show()

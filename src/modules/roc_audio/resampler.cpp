@@ -146,22 +146,16 @@ bool Resampler::resample_buff(Frame& out) {
     roc_panic_if(!curr_frame_);
     roc_panic_if(!next_frame_);
 
+    static size_t window_i = 0;
+
     for (; out_frame_i_ < out.size(); out_frame_i_ += channels_num_) {
-        if (qt_sample_ >= qt_window_size_) {
+        if(window_i >= window_size_){
+            window_i = 0;
             return false;
         }
-
-        if ((qt_sample_ & FRACT_PART_MASK) < qt_epsilon_) {
-            qt_sample_ &= INTEGER_PART_MASK;
-        } else if ((qt_one - (qt_sample_ & FRACT_PART_MASK)) < qt_epsilon_) {
-            qt_sample_ &= INTEGER_PART_MASK;
-            qt_sample_ += qt_one;
-        }
-
-        for (size_t channel = 0; channel < channels_num_; ++channel) {
-            out.data()[out_frame_i_ + channel] = resample_(channel);
-        }
-        qt_sample_ += qt_dt_;
+        out.data()[out_frame_i_] = curr_frame_[window_i];
+        out.data()[out_frame_i_+1] = curr_frame_[window_i+1];
+        window_i += channels_num_;
     }
     out_frame_i_ = 0;
     return true;
