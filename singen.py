@@ -31,7 +31,7 @@ if __name__ == "__main__":
     Fs = 48000
     F = 440.0
     SNR = 140 # dB
-    A = [0.25, 0.1]
+    A = [8000, 1000]
     freq=[440.0, 23e3]
     signal_power = np.square(np.linalg.norm(A))
     noise_sigma = np.sqrt(signal_power / math.pow( 10, SNR/20 ))
@@ -42,9 +42,9 @@ if __name__ == "__main__":
         return f
 
     t = np.arange( 5.0, step = 1/Fs )
-    # y = np.array([[fan(_),0] for _ in t])
-    y = np.zeros([t.shape[0],2],np.int16)
-    y[round(44100*2.5), 0] = 16384
+    y = np.array([[fan(_),0] for _ in t], np.int16)
+    # y = np.zeros([t.shape[0],2],np.int16)
+    # y[round(44100*2.5), 0] = 16384
 
     scipy.io.wavfile.write(options.dest_file, Fs, y)
 
