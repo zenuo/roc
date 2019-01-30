@@ -44,10 +44,17 @@ struct ResamplerConfig {
     //!  Lower values give lower latency and lower memory usage.
     size_t frame_size;
 
+    //! Resampler inetrnal batch size.
+    //! @remarks
+    //!  Defines how much samples to process in one batch. Increases memory usage and
+    //!  improves performance.
+    size_t batch_size;
+
     ResamplerConfig()
         : window_interp(512)
         , window_size(64)
-        , frame_size(256) {
+        , frame_size(256)
+        , batch_size(16) {
     }
 };
 
@@ -106,25 +113,24 @@ private:
         fixedpoint_t qt_sinc_pos_right;
     };
 
-    const packet::channel_mask_t channel_mask_;
-    const size_t channels_num_;
-
-    inline size_t channelize_index(const size_t i, const size_t ch_offset) const {
-        return i * channels_num_ + ch_offset;
-    }
-
+    bool resample_batch_(Frame& out, size_t batch_end);
     sink_pos sink_pos_(const size_t channel_offset) const;
-
-    //! Computes single sample of the particular audio channel.
-    //!
-    //! @param channel_offset a serial number of the channel
-    //!  (e.g. left -- 0, right -- 1, etc.).
     sample_t resample_(size_t channel_offset);
 
     bool check_config_() const;
 
     bool fill_sinc_();
     sample_t sinc_(fixedpoint_t x, float fract_x);
+
+    inline size_t channelize_index(const size_t i, const size_t ch_offset) const {
+        return i * channels_num_ + ch_offset;
+    }
+
+    core::Array<sink_pos> sink_pos_tbl_;
+    const size_t batch_size_;
+
+    const packet::channel_mask_t channel_mask_;
+    const size_t channels_num_;
 
     // Pointers to 3 frames of stream window.
     sample_t* prev_frame_;

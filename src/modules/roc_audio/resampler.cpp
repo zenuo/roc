@@ -76,7 +76,9 @@ inline size_t calc_bits(size_t n) {
 Resampler::Resampler(core::IAllocator& allocator,
                      const ResamplerConfig& config,
                      packet::channel_mask_t channels)
-    : channel_mask_(channels)
+    : sink_pos_tbl_(allocator)
+    , batch_size_(config.batch_size)
+    , channel_mask_(channels)
     , channels_num_(packet::num_channels(channel_mask_))
     , prev_frame_(NULL)
     , curr_frame_(NULL)
@@ -103,6 +105,9 @@ Resampler::Resampler(core::IAllocator& allocator,
         return;
     }
     if (!fill_sinc_()) {
+        return;
+    }
+    if (!sink_pos_tbl_.resize(config.batch_size)) {
         return;
     }
     valid_ = true;
@@ -164,7 +169,22 @@ bool Resampler::resample_buff(Frame& out) {
     roc_panic_if(!curr_frame_);
     roc_panic_if(!next_frame_);
 
-    for (; out_frame_i_ < out.size(); out_frame_i_ += channels_num_) {
+    while (out_frame_i_ < out.size()) {
+        size_t end = out_frame_i_ + batch_size_;
+        if (end > out.size()) {
+            end = out.size();
+        }
+        if (!resample_batch_(out, end)) {
+            return false;
+        }
+    }
+
+    out_frame_i_ = 0;
+    return true;
+}
+
+bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
+    for (; out_frame_i_ < batch_end; out_frame_i_ += channels_num_) {
         if (qt_sample_ >= qt_window_size_) {
             return false;
         }
@@ -181,7 +201,6 @@ bool Resampler::resample_buff(Frame& out) {
         }
         qt_sample_ += qt_dt_;
     }
-    out_frame_i_ = 0;
     return true;
 }
 
