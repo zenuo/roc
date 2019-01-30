@@ -111,6 +111,11 @@ private:
 
         fixedpoint_t qt_sinc_pos_left;
         fixedpoint_t qt_sinc_pos_right;
+
+        size_t i;
+        size_t j;
+
+        bool done;
     };
 
     bool resample_batch_(Frame& out, size_t batch_end);
