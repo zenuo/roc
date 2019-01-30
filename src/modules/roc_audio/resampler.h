@@ -54,7 +54,7 @@ struct ResamplerConfig {
         : window_interp(512)
         , window_size(64)
         , frame_size(256)
-        , batch_size(16) {
+        , batch_size(1024) {
     }
 };
 

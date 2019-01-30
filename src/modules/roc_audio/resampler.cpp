@@ -209,17 +209,22 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
     }
 
     sample_t* out_data = out.data() + out_frame_i_;
-
     for (size_t n = 0; n < num_samples; n++) {
         out_data[n] = 0;
     }
 
-    for (size_t n = 0; n < num_samples; n++) {
-        for (;;) {
-            if (sink_pos_tbl_[n].done) {
-                break;
+    size_t num_complete = 0;
+    while (num_complete < num_samples) {
+        for (size_t n = 0; n < num_samples; n++) {
+            sink_pos& sp = sink_pos_tbl_[n];
+            if (sp.done) {
+                continue;
             }
-            out_data[n] += resample_(sink_pos_tbl_[n]);
+
+            out_data[n] += resample_(sp);
+            if (sp.done) {
+                num_complete++;
+            }
         }
     }
 
