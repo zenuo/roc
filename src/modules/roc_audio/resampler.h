@@ -115,7 +115,7 @@ private:
 
     bool resample_batch_(Frame& out, size_t batch_end);
     sink_pos sink_pos_(const size_t channel_offset) const;
-    sample_t resample_(size_t channel_offset);
+    sample_t resample_(sink_pos& sp);
 
     bool check_config_() const;
 

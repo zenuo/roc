@@ -107,7 +107,7 @@ Resampler::Resampler(core::IAllocator& allocator,
     if (!fill_sinc_()) {
         return;
     }
-    if (!sink_pos_tbl_.resize(config.batch_size)) {
+    if (!sink_pos_tbl_.resize(config.batch_size * channels_num_)) {
         return;
     }
     valid_ = true;
@@ -169,6 +169,9 @@ bool Resampler::resample_buff(Frame& out) {
     roc_panic_if(!curr_frame_);
     roc_panic_if(!next_frame_);
 
+    roc_panic_if((out_frame_i_ % channels_num_) != 0);
+    roc_panic_if((out.size() % channels_num_) != 0);
+
     while (out_frame_i_ < out.size()) {
         size_t end = out_frame_i_ + batch_size_;
         if (end > out.size()) {
@@ -184,9 +187,11 @@ bool Resampler::resample_buff(Frame& out) {
 }
 
 bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
-    for (; out_frame_i_ < batch_end; out_frame_i_ += channels_num_) {
+    size_t num_samples = 0;
+
+    for (size_t pos = out_frame_i_; pos < batch_end; pos += channels_num_) {
         if (qt_sample_ >= qt_window_size_) {
-            return false;
+            break;
         }
 
         if ((qt_sample_ & FRACT_PART_MASK) < qt_epsilon_) {
@@ -197,11 +202,19 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
         }
 
         for (size_t channel = 0; channel < channels_num_; ++channel) {
-            out.data()[out_frame_i_ + channel] = resample_(channel);
+            sink_pos_tbl_[num_samples++] = sink_pos_(channel);
         }
+
         qt_sample_ += qt_dt_;
     }
-    return true;
+
+    sample_t* out_data = out.data() + out_frame_i_;
+    for (size_t n = 0; n < num_samples; n++) {
+        out_data[n] = resample_(sink_pos_tbl_[n]);
+    }
+
+    out_frame_i_ += num_samples;
+    return (out_frame_i_ == batch_end);
 }
 
 bool Resampler::check_config_() const {
@@ -384,9 +397,7 @@ Resampler::sink_pos Resampler::sink_pos_(const size_t channel_offset) const {
     return sp;
 }
 
-sample_t Resampler::resample_(const size_t channel_offset) {
-    sink_pos sp = sink_pos_(channel_offset);
-
+sample_t Resampler::resample_(sink_pos& sp) {
     sample_t accumulator = 0;
 
     size_t i = 0, j = 0;
