@@ -279,7 +279,7 @@ sample_t Resampler::sinc_(const fixedpoint_t x, const float fract_x) {
     return scaling_ > 1.0f ? result / scaling_ : result;
 }
 
-sample_t Resampler::resample_(const size_t channel_offset) {
+Resampler::sink_pos Resampler::sink_pos_(const size_t channel_offset) const {
     const fixedpoint_t qt_sample_minus_half = (qt_sample_ - qt_half_window_len_);
     const fixedpoint_t qt_sample_plus_half = (qt_sample_ + qt_half_window_len_);
 
@@ -345,66 +345,89 @@ sample_t Resampler::resample_(const size_t channel_offset) {
     fixedpoint_t qt_sinc_pos_left = qt_sinc_cur_center;
     fixedpoint_t qt_sinc_pos_right = qt_sinc_step_ - qt_sinc_cur_center;
 
+    sink_pos sp;
+
+    sp.ind_prev_end = ind_prev_end;
+    sp.ind_next_begin = ind_next_begin;
+    sp.ind_cur_center = ind_cur_center;
+
+    sp.len_cur_left = len_cur_left;
+    sp.len_cur_right = len_cur_right;
+    sp.len_prev = len_prev;
+    sp.len_next = len_next;
+
+    sp.f_sinc_pos_fract_left = f_sinc_pos_fract_left;
+    sp.f_sinc_pos_fract_right = f_sinc_pos_fract_right;
+
+    sp.qt_sinc_pos_left = qt_sinc_pos_left;
+    sp.qt_sinc_pos_right = qt_sinc_pos_right;
+
+    return sp;
+}
+
+sample_t Resampler::resample_(const size_t channel_offset) {
+    sink_pos sp = sink_pos_(channel_offset);
+
     sample_t accumulator = 0;
 
     size_t i = 0, j = 0;
 
-    for (; i <= len_cur_left && j < len_cur_right; i += channels_num_, j += channels_num_) {
+    for (; i <= sp.len_cur_left && j < sp.len_cur_right; i += channels_num_, j += channels_num_) {
         // Left half of the current frame.
-        accumulator += curr_frame_[ind_cur_center - i]
-            * sinc_(qt_sinc_pos_left, f_sinc_pos_fract_left);
+        accumulator += curr_frame_[sp.ind_cur_center - i]
+            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
         // Right half of the current frame.
-        accumulator += curr_frame_[ind_cur_center + channels_num_ + j]
-            * sinc_(qt_sinc_pos_right, f_sinc_pos_fract_right);
+        accumulator += curr_frame_[sp.ind_cur_center + channels_num_ + j]
+            * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
-        qt_sinc_pos_left += qt_sinc_step_;
-        qt_sinc_pos_right += qt_sinc_step_;
+        sp.qt_sinc_pos_left += qt_sinc_step_;
+        sp.qt_sinc_pos_right += qt_sinc_step_;
     }
 
-    for (; i <= len_cur_left; i += channels_num_) {
+    for (; i <= sp.len_cur_left; i += channels_num_) {
         // Left half of the current frame.
-        accumulator += curr_frame_[ind_cur_center - i]
-            * sinc_(qt_sinc_pos_left, f_sinc_pos_fract_left);
+        accumulator += curr_frame_[sp.ind_cur_center - i]
+            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
-        qt_sinc_pos_left += qt_sinc_step_;
+        sp.qt_sinc_pos_left += qt_sinc_step_;
     }
 
-    for (; j < len_cur_right; j += channels_num_) {
+    for (; j < sp.len_cur_right; j += channels_num_) {
         // Right half of the current frame.
-        accumulator += curr_frame_[ind_cur_center + channels_num_ + j]
-            * sinc_(qt_sinc_pos_right, f_sinc_pos_fract_right);
+        accumulator += curr_frame_[sp.ind_cur_center + channels_num_ + j]
+            * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
-        qt_sinc_pos_right += qt_sinc_step_;
+        sp.qt_sinc_pos_right += qt_sinc_step_;
     }
 
-    for (; i <= len_prev && j < len_next; i += channels_num_, j += channels_num_) {
+    for (; i <= sp.len_prev && j < sp.len_next; i += channels_num_, j += channels_num_) {
         // Previous frame.
-        accumulator += prev_frame_[ind_prev_end - (i - len_cur_left)]
-            * sinc_(qt_sinc_pos_left, f_sinc_pos_fract_left);
+        accumulator += prev_frame_[sp.ind_prev_end - (i - sp.len_cur_left)]
+            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
         // Next frame.
-        accumulator += next_frame_[ind_next_begin + (j - len_cur_right)]
-            * sinc_(qt_sinc_pos_right, f_sinc_pos_fract_right);
+        accumulator += next_frame_[sp.ind_next_begin + (j - sp.len_cur_right)]
+            * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
-        qt_sinc_pos_left += qt_sinc_step_;
-        qt_sinc_pos_right += qt_sinc_step_;
+        sp.qt_sinc_pos_left += qt_sinc_step_;
+        sp.qt_sinc_pos_right += qt_sinc_step_;
     }
 
-    for (; i <= len_prev; i += channels_num_) {
+    for (; i <= sp.len_prev; i += channels_num_) {
         // Previous frame.
-        accumulator += prev_frame_[ind_prev_end - (i - len_cur_left)]
-            * sinc_(qt_sinc_pos_left, f_sinc_pos_fract_left);
+        accumulator += prev_frame_[sp.ind_prev_end - (i - sp.len_cur_left)]
+            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
-        qt_sinc_pos_left += qt_sinc_step_;
+        sp.qt_sinc_pos_left += qt_sinc_step_;
     }
 
-    for (; j < len_next; j += channels_num_) {
+    for (; j < sp.len_next; j += channels_num_) {
         // Next frame.
-        accumulator += next_frame_[ind_next_begin + (j - len_cur_right)]
-            * sinc_(qt_sinc_pos_right, f_sinc_pos_fract_right);
+        accumulator += next_frame_[sp.ind_next_begin + (j - sp.len_cur_right)]
+            * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
-        qt_sinc_pos_right += qt_sinc_step_;
+        sp.qt_sinc_pos_right += qt_sinc_step_;
     }
 
     return accumulator;

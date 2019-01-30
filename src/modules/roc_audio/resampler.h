@@ -89,12 +89,31 @@ private:
     typedef int32_t signed_fixedpoint_t;
     typedef int64_t signed_long_fixedpoint_t;
 
+    struct sink_pos {
+        size_t ind_prev_end;
+        size_t ind_next_begin;
+        size_t ind_cur_center;
+
+        size_t len_cur_left;
+        size_t len_cur_right;
+        size_t len_prev;
+        size_t len_next;
+
+        float f_sinc_pos_fract_left;
+        float f_sinc_pos_fract_right;
+
+        fixedpoint_t qt_sinc_pos_left;
+        fixedpoint_t qt_sinc_pos_right;
+    };
+
     const packet::channel_mask_t channel_mask_;
     const size_t channels_num_;
 
     inline size_t channelize_index(const size_t i, const size_t ch_offset) const {
         return i * channels_num_ + ch_offset;
     }
+
+    sink_pos sink_pos_(const size_t channel_offset) const;
 
     //! Computes single sample of the particular audio channel.
     //!
