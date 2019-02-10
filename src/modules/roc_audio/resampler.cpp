@@ -219,7 +219,7 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
     fixedpoint_t limit = 0;
     fixedpoint_t limit_step = qt_sinc_step_ * 300;
 
-    while (num_complete < num_samples * channels_num_) {
+    while (num_complete < num_samples) {
         for (size_t n = 0; n < num_samples ; n++) {
             sink_pos& sp = sink_pos_tbl_[n];
 
@@ -229,6 +229,16 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
                     num_complete++;
                 }
             }
+        }
+        limit += limit_step;
+    }
+
+    limit = 0;
+    num_complete = 0;
+
+    while (num_complete < num_samples) {
+        for (size_t n = 0; n < num_samples ; n++) {
+            sink_pos& sp = sink_pos_tbl_[n];
 
             if (!sp.done_right) {
                 out_data[n] += resample_right_(sp, limit);
