@@ -122,8 +122,8 @@ private:
     bool resample_batch_(Frame& out, size_t batch_end);
     sink_pos sink_pos_(const size_t channel_offset) const;
 
-    sample_t resample_left_(sink_pos& sp);
-    sample_t resample_right_(sink_pos& sp);
+    sample_t resample_left_(sink_pos& sp, fixedpoint_t limit);
+    sample_t resample_right_(sink_pos& sp, fixedpoint_t limit);
 
     bool check_config_() const;
 

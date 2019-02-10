@@ -201,6 +201,7 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
             qt_sample_ += qt_one;
         }
 
+
         for (size_t channel = 0; channel < channels_num_; ++channel) {
             sink_pos_tbl_[num_samples++] = sink_pos_(channel);
         }
@@ -214,24 +215,29 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
     }
 
     size_t num_complete = 0;
+
+    fixedpoint_t limit = 0;
+    fixedpoint_t limit_step = qt_sinc_step_ * 300;
+
     while (num_complete < num_samples * channels_num_) {
         for (size_t n = 0; n < num_samples ; n++) {
             sink_pos& sp = sink_pos_tbl_[n];
 
             if (!sp.done_left) {
-                out_data[n] += resample_left_(sp);
+                out_data[n] += resample_left_(sp, limit);
                 if (sp.done_left) {
                     num_complete++;
                 }
             }
 
             if (!sp.done_right) {
-                out_data[n] += resample_right_(sp);
+                out_data[n] += resample_right_(sp, limit);
                 if (sp.done_right) {
                     num_complete++;
                 }
             }
         }
+        limit += limit_step;
     }
 
     out_frame_i_ += num_samples;
@@ -424,24 +430,30 @@ Resampler::sink_pos Resampler::sink_pos_(const size_t channel_offset) const {
     return sp;
 }
 
-sample_t Resampler::resample_left_(sink_pos& sp) {
+sample_t Resampler::resample_left_(sink_pos& sp, fixedpoint_t limit) {
     sample_t accumulator = 0;
 
     while (sp.i <= sp.len_cur_left) {
+        if (sp.qt_sinc_pos_left > limit) {
+            return accumulator;
+        }
+
         accumulator += curr_frame_[sp.ind_cur_center - sp.i]
             * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
         sp.qt_sinc_pos_left += qt_sinc_step_;
-
         sp.i += channels_num_;
     }
 
     while (sp.i <= sp.len_prev) {
+        if (sp.qt_sinc_pos_left > limit) {
+            return accumulator;
+        }
+
         accumulator += prev_frame_[sp.ind_prev_end - (sp.i - sp.len_cur_left)]
             * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
         sp.qt_sinc_pos_left += qt_sinc_step_;
-
         sp.i += channels_num_;
     }
 
@@ -450,10 +462,14 @@ sample_t Resampler::resample_left_(sink_pos& sp) {
     return accumulator;
 }
 
-sample_t Resampler::resample_right_(sink_pos& sp) {
+sample_t Resampler::resample_right_(sink_pos& sp, fixedpoint_t limit) {
     sample_t accumulator = 0;
 
     while (sp.j < sp.len_cur_right) {
+        if (sp.qt_sinc_pos_right > limit) {
+            return accumulator;
+        }
+
         accumulator += curr_frame_[sp.ind_cur_center + channels_num_ + sp.j]
             * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
@@ -463,11 +479,14 @@ sample_t Resampler::resample_right_(sink_pos& sp) {
     }
 
     while (sp.j < sp.len_next) {
+        if (sp.qt_sinc_pos_right > limit) {
+            return accumulator;
+        }
+
         accumulator += next_frame_[sp.ind_next_begin + (sp.j - sp.len_cur_right)]
             * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
         sp.qt_sinc_pos_right += qt_sinc_step_;
-
         sp.j += channels_num_;
     }
 
