@@ -214,16 +214,22 @@ bool Resampler::resample_batch_(Frame& out, size_t batch_end) {
     }
 
     size_t num_complete = 0;
-    while (num_complete < num_samples) {
-        for (size_t n = 0; n < num_samples; n++) {
+    while (num_complete < num_samples * channels_num_) {
+        for (size_t n = 0; n < num_samples ; n++) {
             sink_pos& sp = sink_pos_tbl_[n];
-            if (sp.done) {
-                continue;
+
+            if (!sp.done_left) {
+                out_data[n] += resample_left_(sp);
+                if (sp.done_left) {
+                    num_complete++;
+                }
             }
 
-            out_data[n] += resample_(sp);
-            if (sp.done) {
-                num_complete++;
+            if (!sp.done_right) {
+                out_data[n] += resample_right_(sp);
+                if (sp.done_right) {
+                    num_complete++;
+                }
             }
         }
     }
@@ -412,99 +418,61 @@ Resampler::sink_pos Resampler::sink_pos_(const size_t channel_offset) const {
     sp.i = 0;
     sp.j = 0;
 
-    sp.done = false;
+    sp.done_left = false;
+    sp.done_right = false;
 
     return sp;
 }
 
-sample_t Resampler::resample_(sink_pos& sp) {
+sample_t Resampler::resample_left_(sink_pos& sp) {
     sample_t accumulator = 0;
 
-    if (sp.i <= sp.len_cur_left && sp.j < sp.len_cur_right) {
-        // Left half of the current frame.
-        accumulator += curr_frame_[sp.ind_cur_center - sp.i]
-            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
-
-        // Right half of the current frame.
-        accumulator += curr_frame_[sp.ind_cur_center + channels_num_ + sp.j]
-            * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
-
-        sp.qt_sinc_pos_left += qt_sinc_step_;
-        sp.qt_sinc_pos_right += qt_sinc_step_;
-
-        sp.i += channels_num_;
-        sp.j += channels_num_;
-
-        return accumulator;
-    }
-
-    if (sp.i <= sp.len_cur_left) {
-        // Left half of the current frame.
+    while (sp.i <= sp.len_cur_left) {
         accumulator += curr_frame_[sp.ind_cur_center - sp.i]
             * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
 
         sp.qt_sinc_pos_left += qt_sinc_step_;
 
         sp.i += channels_num_;
-
-        return accumulator;
     }
 
-    if (sp.j < sp.len_cur_right) {
-        // Right half of the current frame.
+    while (sp.i <= sp.len_prev) {
+        accumulator += prev_frame_[sp.ind_prev_end - (sp.i - sp.len_cur_left)]
+            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
+
+        sp.qt_sinc_pos_left += qt_sinc_step_;
+
+        sp.i += channels_num_;
+    }
+
+    sp.done_left = true;
+
+    return accumulator;
+}
+
+sample_t Resampler::resample_right_(sink_pos& sp) {
+    sample_t accumulator = 0;
+
+    while (sp.j < sp.len_cur_right) {
         accumulator += curr_frame_[sp.ind_cur_center + channels_num_ + sp.j]
             * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
         sp.qt_sinc_pos_right += qt_sinc_step_;
 
         sp.j += channels_num_;
-
-        return accumulator;
     }
 
-    if (sp.i <= sp.len_prev && sp.j < sp.len_next) {
-        // Previous frame.
-        accumulator += prev_frame_[sp.ind_prev_end - (sp.i - sp.len_cur_left)]
-            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
-
-        // Next frame.
-        accumulator += next_frame_[sp.ind_next_begin + (sp.j - sp.len_cur_right)]
-            * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
-
-        sp.qt_sinc_pos_left += qt_sinc_step_;
-        sp.qt_sinc_pos_right += qt_sinc_step_;
-
-        sp.i += channels_num_;
-        sp.j += channels_num_;
-
-        return accumulator;
-    }
-
-    if (sp.i <= sp.len_prev) {
-        // Previous frame.
-        accumulator += prev_frame_[sp.ind_prev_end - (sp.i - sp.len_cur_left)]
-            * sinc_(sp.qt_sinc_pos_left, sp.f_sinc_pos_fract_left);
-
-        sp.qt_sinc_pos_left += qt_sinc_step_;
-
-        sp.i += channels_num_;
-
-        return accumulator;
-    }
-
-    if (sp.j < sp.len_next) {
-        // Next frame.
+    while (sp.j < sp.len_next) {
         accumulator += next_frame_[sp.ind_next_begin + (sp.j - sp.len_cur_right)]
             * sinc_(sp.qt_sinc_pos_right, sp.f_sinc_pos_fract_right);
 
         sp.qt_sinc_pos_right += qt_sinc_step_;
 
         sp.j += channels_num_;
-
-        return accumulator;
     }
 
-    sp.done = true;
+    sp.done_right = true;
+
     return accumulator;
 }
 
