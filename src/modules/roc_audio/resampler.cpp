@@ -340,6 +340,9 @@ bool Resampler::fill_sinc_() {
 sample_t Resampler::sinc_(const fixedpoint_t x, const float fract_x) {
     const size_t index = (x >> (FRACT_BIT_COUNT - window_interp_bits_));
 
+    const size_t next_index = ((x + qt_sinc_step_) >> (FRACT_BIT_COUNT - window_interp_bits_));
+    __builtin_prefetch(sinc_table_ptr_ + next_index);
+
     const sample_t hl = sinc_table_ptr_[index];     // table index smaller than x
     const sample_t hh = sinc_table_ptr_[index + 1]; // table index next to x
 
