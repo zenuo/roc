@@ -371,12 +371,13 @@ if not compiler_ver:
 
 conf = Configure(env, custom_tests=env.CustomTests)
 
-conf.FindLLVMDir(compiler_ver)
+if compiler == 'clang':
+    conf.FindLLVMDir(compiler_ver)
 
-if compiler == 'gcc':
-    conf.FindTool('CXX', toolchain, compiler_ver, ['g++'])
-elif compiler == 'clang':
+if compiler == 'clang':
     conf.FindTool('CXX', toolchain, compiler_ver, ['clang++'])
+elif compiler == 'gcc':
+    conf.FindTool('CXX', toolchain, compiler_ver, ['g++'])
 
 # get full compiler version
 compiler_ver = env.ParseCompilerVersion(env['CXX'])
@@ -398,21 +399,21 @@ if not platform:
     elif 'darwin' in host:
         platform = 'darwin'
 
-if compiler == 'gcc':
+if compiler == 'clang':
+    conf.FindTool('CC', toolchain, compiler_ver, ['clang'])
+    conf.FindTool('LD', toolchain, compiler_ver, ['clang++'])
+    conf.FindTool('RANLIB', toolchain, None, ['llvm-ranlib', 'ranlib'])
+elif compiler == 'gcc':
     conf.FindTool('CC', toolchain, compiler_ver, ['gcc'])
     conf.FindTool('LD', toolchain, compiler_ver, ['g++'])
     conf.FindTool('RANLIB', toolchain, None, ['ranlib'])
-elif compiler == 'clang':
-    conf.FindTool('CC', toolchain, compiler_ver, ['clang'])
-    conf.FindTool('LD', toolchain, compiler_ver, ['clang++'])
-    conf.FindTool('RANLIB', toolchain, None, ['llvm-randlib', 'ranlib'])
 
 if platform == 'darwin' and not crosscompile:
     conf.FindTool('AR', None, None, [['libtool', '-static', '-o'], 'llvm-ar', 'ar'])
-elif compiler == 'gcc':
-    conf.FindTool('AR', toolchain, None, ['ar'])
 elif compiler == 'clang':
     conf.FindTool('AR', toolchain, None, ['llvm-ar', 'ar'])
+elif compiler == 'gcc':
+    conf.FindTool('AR', toolchain, None, ['ar'])
 
 env['LINK'] = env['LD']
 env['SHLINK'] = env['LD']

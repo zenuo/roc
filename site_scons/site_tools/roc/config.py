@@ -53,19 +53,19 @@ def CheckProg(context, prog, name=''):
         name += ' '
     context.Message("Checking for %sexecutable %s... " % (name, prog))
 
-    if context.env.Which(prog):
-        context.Result('yes')
+    path = context.env.Which(prog)
+    if path:
+        context.Result(path[0])
         return True
     else:
-        context.Result('no')
+        context.Result('not found')
         return False
 
 def FindTool(context, var, toolchain, version, commands):
     env = context.env
 
     if env.HasArg(var):
-        CheckProg(context, env[var], name=var)
-        return
+        return CheckProg(context, env[var], name=var)
 
     for tool_cmd in commands:
         if isinstance(tool_cmd, list):
@@ -108,7 +108,8 @@ def FindTool(context, var, toolchain, version, commands):
             var,
             ', '.join([' '.join(c) if isinstance(c, list) else c for c in commands])))
 
-    CheckProg(context, env[var], name=var)
+    if not CheckProg(context, env[var], name=var):
+        return False
 
     if version:
         actual_ver = env.ParseCompilerVersion(env[var])
@@ -123,26 +124,36 @@ def FindTool(context, var, toolchain, version, commands):
                     env[var],
                     '.'.join(map(str, actual_ver))))
 
+    return True
+
 def FindLLVMDir(context, version):
     context.Message(
         "Checking for PATH for llvm %s... " % '.'.join(map(str, version)))
 
-    suffixes = []
-    for n in [3, 2, 1]:
-        v = '.'.join(map(str, version[:n]))
-        suffixes += [
-            '-' + v,
-            '/' + v,
+    def macos_dirs():
+        return [
+        '/Library/Developer/CommandLineTools/usr/bin',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin',
         ]
-    suffixes += ['']
 
-    for s in suffixes:
-        llvmdir = '/usr/lib/llvm' + s
+    def linux_dirs():
+        suffixes = []
+        for n in [3, 2, 1]:
+            v = '.'.join(map(str, version[:n]))
+            suffixes += [
+                '-' + v,
+                '/' + v,
+            ]
+        suffixes += ['']
+        ret = []
+        for s in suffixes:
+            ret.append('/usr/lib/llvm%s/bin' % s)
+        return ret
 
+    for llvmdir in macos_dirs() + linux_dirs():
         if os.path.isdir(llvmdir):
-            llvmpath = llvmdir + '/bin'
-            context.env['ENV']['PATH'] += ':' + llvmpath
-            context.Result(llvmpath)
+            context.env['ENV']['PATH'] += llvmdir + ':' + context.env['ENV']['PATH']
+            context.Result(llvmdir)
             return True
 
     context.Result('not found')
